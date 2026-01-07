@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { api, apiMultipart } from '@/lib/api';
 import { toast } from '@/hooks/use-toast';
 
 export interface Student {
@@ -17,6 +17,48 @@ export interface Student {
   updated_at: string;
 }
 
+interface BackendStudent {
+  _id: string;
+  fullName: string;
+  email: string;
+  phone?: string;
+  dateOfBirth?: string;
+  gender?: string;
+  courseOrDepartment?: string;
+  batchOrYear?: string;
+  address?: string;
+  profileImageUrl?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const transformBackendStudent = (student: BackendStudent): Student => ({
+  id: student._id,
+  full_name: student.fullName,
+  email: student.email,
+  phone: student.phone || null,
+  date_of_birth: student.dateOfBirth || null,
+  gender: student.gender || null,
+  course_or_department: student.courseOrDepartment || null,
+  batch_or_year: student.batchOrYear || null,
+  address: student.address || null,
+  profile_image_url: student.profileImageUrl || null,
+  created_at: student.createdAt,
+  updated_at: student.updatedAt,
+});
+
+const transformStudentForBackend = (student: Omit<Student, 'id' | 'created_at' | 'updated_at'>) => ({
+  fullName: student.full_name,
+  email: student.email,
+  phone: student.phone,
+  dateOfBirth: student.date_of_birth,
+  gender: student.gender,
+  courseOrDepartment: student.course_or_department,
+  batchOrYear: student.batch_or_year,
+  address: student.address,
+  profileImageUrl: student.profile_image_url,
+});
+
 export type StudentInput = Omit<Student, 'id' | 'created_at' | 'updated_at'>;
 
 export function useStudents() {
@@ -25,26 +67,30 @@ export function useStudents() {
   const { data: students = [], isLoading, error } = useQuery({
     queryKey: ['students'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('students')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data as Student[];
+      const response = await api('/students');
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Failed to fetch students');
+      }
+      return (response.data as BackendStudent[]).map(transformBackendStudent);
     },
   });
 
   const createStudent = useMutation({
     mutationFn: async (student: StudentInput) => {
-      const { data, error } = await supabase
-        .from('students')
-        .insert([student])
-        .select()
-        .single();
+      const formData = new FormData();
+      const transformed = transformStudentForBackend(student);
 
-      if (error) throw error;
-      return data;
+      Object.entries(transformed).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formData.append(key, String(value));
+        }
+      });
+
+      const response = await apiMultipart('/students', formData);
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Failed to create student');
+      }
+      return transformBackendStudent(response.data as BackendStudent);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
@@ -64,15 +110,20 @@ export function useStudents() {
 
   const updateStudent = useMutation({
     mutationFn: async ({ id, ...student }: Partial<Student> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('students')
-        .update(student)
-        .eq('id', id)
-        .select()
-        .single();
+      const formData = new FormData();
+      const transformed = transformStudentForBackend(student as any);
 
-      if (error) throw error;
-      return data;
+      Object.entries(transformed).forEach(([key, value]) => {
+        if (value !== null && value !== undefined) {
+          formData.append(key, String(value));
+        }
+      });
+
+      const response = await apiMultipart(`/students/${id}`, formData, { method: 'PUT' });
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Failed to update student');
+      }
+      return transformBackendStudent(response.data as BackendStudent);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
@@ -92,12 +143,10 @@ export function useStudents() {
 
   const deleteStudent = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('students')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      const response = await api(`/students/${id}`, { method: 'DELETE' });
+      if (!response.success) {
+        throw new Error(response.message || 'Failed to delete student');
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['students'] });
@@ -116,15 +165,17 @@ export function useStudents() {
   });
 
   const uploadImage = async (file: File): Promise<string | null> => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${crypto.randomUUID()}.${fileExt}`;
-    const filePath = `profiles/${fileName}`;
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
 
-    const { error: uploadError } = await supabase.storage
-      .from('student-images')
-      .upload(filePath, file);
+      const response = await apiMultipart('/students/upload-image', formData);
+      if (!response.success || !response.url) {
+        throw new Error(response.message || 'Failed to upload image');
+      }
 
-    if (uploadError) {
+      return response.url;
+    } catch (error) {
       toast({
         title: "Error",
         description: "Failed to upload image",
@@ -132,12 +183,6 @@ export function useStudents() {
       });
       return null;
     }
-
-    const { data } = supabase.storage
-      .from('student-images')
-      .getPublicUrl(filePath);
-
-    return data.publicUrl;
   };
 
   return {
