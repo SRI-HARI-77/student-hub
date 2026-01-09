@@ -15,6 +15,7 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error: Error | null }>;
+  confirmResetPassword: (token: string, password: string) => Promise<{ error: Error | null }>;
   updatePassword: (password: string) => Promise<{ error: Error | null }>;
 }
 
@@ -92,6 +93,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const confirmResetPassword = async (token: string, password: string) => {
+    try {
+      await api('/auth/reset-password', {
+        method: 'POST',
+        body: JSON.stringify({ token, password }),
+        requiresAuth: false,
+      });
+
+      return { error: null };
+    } catch (error) {
+      return { error: error instanceof Error ? error : new Error('Password reset failed') };
+    }
+  };
+
   const updatePassword = async (password: string) => {
     try {
       await api('/auth/update-password', {
@@ -113,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signIn,
       signOut,
       resetPassword,
+      confirmResetPassword,
       updatePassword
     }}>
       {children}

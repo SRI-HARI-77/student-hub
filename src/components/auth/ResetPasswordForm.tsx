@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
@@ -13,28 +13,53 @@ import { toast } from '@/hooks/use-toast';
 export function ResetPasswordForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const { updatePassword } = useAuth();
+  const [searchParams] = useSearchParams();
+  const { confirmResetPassword } = useAuth();
   const navigate = useNavigate();
-  
+
+  const token = searchParams.get('token');
+
   const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<ResetPasswordFormData>({
     resolver: zodResolver(resetPasswordSchema),
   });
 
+  useEffect(() => {
+    if (!token) {
+      toast({
+        title: "Error",
+        description: "Invalid or missing reset token. Please request a new password reset link.",
+        variant: "destructive",
+      });
+      setTimeout(() => navigate('/forgot-password'), 3000);
+    }
+  }, [token, navigate]);
+
   const onSubmit = async (data: ResetPasswordFormData) => {
-    const { error } = await updatePassword(data.password);
-    
+    if (!token) {
+      toast({
+        title: "Error",
+        description: "Reset token is missing",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const { error } = await confirmResetPassword(token, data.password);
+
     if (error) {
       toast({
         title: "Error",
-        description: error.message,
+        description: error.message === 'Password reset failed'
+          ? 'Invalid or expired reset token. Please request a new password reset link.'
+          : error.message,
         variant: "destructive",
       });
     } else {
       toast({
         title: "Success",
-        description: "Password reset successful",
+        description: "Password reset successful. Please login with your new password.",
       });
-      navigate('/login');
+      setTimeout(() => navigate('/login'), 2000);
     }
   };
 
@@ -94,10 +119,22 @@ export function ResetPasswordForm() {
           className="w-full"
           size="lg"
           loading={isSubmitting}
+          disabled={!token}
         >
-          Update Password
+          Reset Password
         </GradientButton>
       </motion.div>
+
+      {!token && (
+        <motion.p
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.4 }}
+          className="text-center text-sm text-destructive"
+        >
+          Invalid reset link. Redirecting...
+        </motion.p>
+      )}
     </form>
   );
 }
